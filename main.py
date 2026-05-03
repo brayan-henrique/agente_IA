@@ -63,7 +63,7 @@ def iniciar_sistema():
             # ========================================================
             # 👁️ O NOVO GATILHO DE VISÃO (Altamente Flexível)
             # ========================================================
-            gatilhos_visao = ["clique", "clica", "selecione", "coloque aquele", "coloque o", "toca no"]
+            gatilhos_visao = ["clique", "clica", "selecione","seleciona", "coloque aquele", "coloque o", "toca no"]
             
             if any(gatilho in frase for gatilho in gatilhos_visao):
                 print("🤖 Jairo: Entendido. Analisando a tela com meus olhos...")
