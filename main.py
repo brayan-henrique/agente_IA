@@ -2,8 +2,6 @@ import keyboard
 from ouvidos import ouvir
 from cerebro import processar_com_ia
 from maos import mapear_programas_windows, executar_acao
-
-# IMPORTANDO OS NOVOS OLHOS DO JAIRO
 from olhos import clicar_no_elemento 
 
 def iniciar_sistema():
@@ -19,10 +17,12 @@ def iniciar_sistema():
     modo_espera = False 
     
     while True:
+        # Atalho de Emergência
         if keyboard.is_pressed('ctrl+alt+k'):
             print("\n🤖 Jairo: Encerrando sistemas por comando de teclado. Até a próxima.")
             break
 
+        # Atalho de Dormir
         if keyboard.is_pressed('ctrl+alt+d'):
             if not modo_espera: 
                 modo_espera = True
@@ -42,6 +42,7 @@ def iniciar_sistema():
             for errado, certo in correcoes.items():
                 frase = frase.replace(errado, certo)
                 
+            # Verifica se o Jairo está dormindo
             if modo_espera:
                 if "jairo" in frase:
                     modo_espera = False
@@ -51,6 +52,7 @@ def iniciar_sistema():
 
             print(f"\n🗣️ Você: '{frase}'")
             
+            # Comandos manuais para dormir/desligar
             if "parar de escutar" in frase or "vai dormir" in frase or "modo de espera" in frase:
                 modo_espera = True
                 print("🤖 Jairo: Entrando em modo de espera. É só chamar meu nome quando precisar.")
@@ -61,32 +63,26 @@ def iniciar_sistema():
                 break
                 
             # ========================================================
-            # 👁️ O NOVO GATILHO DE VISÃO (Altamente Flexível)
-            # ========================================================
-            gatilhos_visao = ["clique", "clica", "selecione","seleciona", "coloque aquele", "coloque o", "toca no"]
-            
-            if any(gatilho in frase for gatilho in gatilhos_visao):
-                print("🤖 Jairo: Entendido. Analisando a tela com meus olhos...")
-                # Repassa a sua frase inteira para o modelo de visão entender o contexto
-                resultado_visao = clicar_no_elemento(frase) 
-                print(f"   [👁️ AÇÃO VISUAL]: {resultado_visao}")
-                
-                # O 'continue' faz ele voltar a te ouvir sem precisar passar pelo cérebro de texto, 
-                # economizando tempo de processamento.
-                continue 
-
-            # ========================================================
-            # 🧠 O CÉREBRO DE TEXTO TRADICIONAL (Ações e Conversa)
+            # 🧠 O CÉREBRO TOMA TODAS AS DECISÕES (Roteamento Semântico)
             # ========================================================
             comando_ia = processar_com_ia(frase)
             
             if comando_ia:
                 fala_jairo = comando_ia.get("resposta", "")
+                acao = comando_ia.get("acao", "nenhuma")
+                alvo = comando_ia.get("alvo", "")
+
+                # 1º O Jairo sempre responde primeiro (conversacional/didático)
                 if fala_jairo:
                     print(f"🤖 Jairo: {fala_jairo}")
                 
-                acao = comando_ia.get("acao", "nenhuma")
-                if acao != "nenhuma":
+                # 2º Ele distribui as tarefas com base na intenção
+                if acao == "usar_visao":
+                    print(f"   [👁️ JAIRO ESTÁ PROCURANDO '{alvo.upper()}' NA TELA...]")
+                    resultado_visao = clicar_no_elemento(alvo) 
+                    print(f"   [RESULTADO VISUAL]: {resultado_visao}")
+                
+                elif acao != "nenhuma":
                     resultado = executar_acao(comando_ia, mapa_programas)
                     print(f"   [⚙️ AÇÃO EXECUTADA]: {resultado}")
 
