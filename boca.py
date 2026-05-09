@@ -1,21 +1,33 @@
-import pyttsx3
+import edge_tts
+import asyncio
+import pygame
+import os
 
+# Função para gerar e tocar a voz
+async def comunicar(texto):
+    # Escolha da voz: 'pt-BR-AntonioNeural' (Masculina/Séria) ou 'pt-BR-FranciscaNeural'
+    VOZ = "pt-BR-AntonioNeural" 
+    ARQUIVO_AUDIO = "fala_jairo.mp3"
+
+    # 1. Gera o áudio usando a API da Microsoft
+    comunicador = edge_tts.Communicate(texto, VOZ)
+    await comunicador.save(ARQUIVO_AUDIO)
+
+    # 2. Toca o áudio
+    pygame.mixer.init()
+    pygame.mixer.music.load(ARQUIVO_AUDIO)
+    pygame.mixer.music.play()
+
+    # Espera o áudio terminar de tocar
+    while pygame.mixer.music.get_busy():
+        continue
+    
+    pygame.mixer.quit()
+    
+    # 3. Limpa o arquivo temporário
+    if os.path.exists(ARQUIVO_AUDIO):
+        os.remove(ARQUIVO_AUDIO)
+
+# Função auxiliar para chamar o async de forma simples
 def falar(texto):
-    # Inicializa o motor de voz
-    motor_voz = pyttsx3.init()
-    
-    # Ajusta a velocidade da fala (175 é um ritmo natural, 200 é muito rápido)
-    motor_voz.setProperty('rate', 175)
-    
-    # Procura as vozes instaladas no seu PC e escolhe a brasileira (Maria ou Daniel geralmente)
-    vozes = motor_voz.getProperty('voices')
-    for voz in vozes:
-        nome_voz = voz.name.lower()
-        if "brazil" in nome_voz or "portuguese" in nome_voz or "maria" in nome_voz or "daniel" in nome_voz:
-            motor_voz.setProperty('voice', voz.id)
-            break
-            
-    # Imprime na tela e fala o texto em voz alta
-    print(f"\n[🔊 BOCA]: {texto}")
-    motor_voz.say(texto)
-    motor_voz.runAndWait() # Pausa o script até ele terminar de falar
+    asyncio.run(comunicar(texto))

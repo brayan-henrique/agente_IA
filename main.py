@@ -74,7 +74,9 @@ def iniciar_sistema():
 
                 # 1º O Jairo sempre responde primeiro (conversacional/didático)
                 if fala_jairo:
+                    from boca import falar # Importa a função nova
                     print(f"🤖 Jairo: {fala_jairo}")
+                    falar(fala_jairo) # O Jairo agora fala com voz neural!
                 
                 # 2º Ele distribui as tarefas com base na intenção
                 if acao == "usar_visao":
