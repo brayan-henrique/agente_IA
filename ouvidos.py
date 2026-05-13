@@ -1,56 +1,34 @@
 import speech_recognition as sr
-import os
-from groq import Groq
-import os
-from dotenv import load_dotenv
 
-# Carregar variáveis de ambiente
-load_dotenv()
+reconhecedor = sr.Recognizer()
 
-# Sua chave que você salvou
-CHAVE_GROQ = os.getenv("GROQ_API_KEY")
-
-cliente = Groq(api_key=CHAVE_GROQ)
+# Desativa a loucura de ficar mudando a sensibilidade do microfone toda hora
+reconhecedor.dynamic_energy_threshold = False
+# Define uma sensibilidade padrão (se o seu quarto for barulhento, você pode aumentar esse número para 500 ou 600)
+reconhecedor.energy_threshold = 400
 
 def ouvir():
-    reconhecedor = sr.Recognizer()
-    
     with sr.Microphone() as fonte:
-        reconhecedor.adjust_for_ambient_noise(fonte, duration=1) 
-        print("\n[🎙️] Estou ouvindo... (Fale agora)")
+        print("\n[🎙️] Ouvindo... (Pode falar)")
+        
+        # 1. Calibra o ruído do ambiente por 1 segundo inteiro (antes era 0.5)
+        reconhecedor.adjust_for_ambient_noise(fonte, duration=1.0)
+        
+        # 2. Quanto tempo de silêncio EXATO ele espera antes de achar que você terminou a frase
+        reconhecedor.pause_threshold = 2.0 
         
         try:
-            audio_dados = reconhecedor.listen(fonte, timeout=5, phrase_time_limit=10)
+            # phrase_time_limit: O Jairo agora te escuta falar sem parar por até 20 segundos
+            audio_dados = reconhecedor.listen(fonte, timeout=None, phrase_time_limit=20)
             
-            # 1. Usamos um nome de arquivo fixo e simples
-            nome_temp = "audio_temp.wav"
-            
-            with open(nome_temp, "wb") as f:
-                f.write(audio_dados.get_wav_data())
-            
-            print("[☁️] Enviando para a nuvem da Groq...")
-            
-            # 2. O TRUQUE: Abrimos o arquivo e passamos um nome "fake" (audio.wav) 
-            # para a Groq, assim ela não vê os acentos da sua pasta no Windows.
-            with open(nome_temp, "rb") as arquivo_audio:
-                transcricao = cliente.audio.transcriptions.create(
-                    file=("audio.wav", arquivo_audio.read()), # Aqui forçamos um nome sem acento
-                    model="whisper-large-v3",
-                    language="pt"
-                )
-            
-            texto = transcricao.text.strip()
-            
-            if os.path.exists(nome_temp):
-                os.remove(nome_temp)
-                
-            return texto
+            print("[☁️] Processando voz...")
+            frase = reconhecedor.recognize_google(audio_dados, language='pt-BR')
+            return frase
             
         except sr.WaitTimeoutError:
-            return None
+            return ""
+        except sr.UnknownValueError:
+            return "" # Ignora quando ele não entende o que você murmurou
         except Exception as e:
-            # Se der erro, ele tenta limpar o arquivo para não travar a próxima tentativa
-            if 'nome_temp' in locals() and os.path.exists(nome_temp):
-                os.remove(nome_temp)
-            print(f"[ERRO NOS OUVIDOS DA NUVEM] {e}")
-            return None
+            print(f"[ERRO NO MICROFONE]: {e}")
+            return ""

@@ -2,58 +2,76 @@ import pyautogui
 import base64
 import os
 import json
+import time
+from PIL import Image
 from groq import Groq
-import os
 from dotenv import load_dotenv
 
+# Carrega as credenciais e inicializa a IA
 load_dotenv()
-CHAVE_GROQ = os.getenv("GROQ_API_KEY")
-cliente = Groq(api_key=CHAVE_GROQ)
+cliente = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-def clicar_no_elemento(descricao_alvo):
-    # 1. Captura a tela e pega a resolução real do seu monitor
-    largura_real, altura_real = pyautogui.size()
+def tirar_print_otimizado(modo="alta"):
+    """Tira print e comprime para economizar dados e tempo de API"""
     screenshot = pyautogui.screenshot()
-    screenshot.save("view.png")
-
-    with open("view.png", "rb") as img:
-        img_b64 = base64.b64encode(img.read()).decode('utf-8')
-
-    # 2. O Prompt "Mestre" que ensina a IA a medir a tela
-    prompt = f"""Analise este print. O usuário quer clicar em: "{descricao_alvo}".
-    Imagine que a tela é uma grade que vai de 0 a 1000 (X e Y).
-    Identifique o centro do objeto solicitado.
+    caminho = "view_temp.jpg"
     
-    Responda EXATAMENTE neste formato JSON:
-    {{"x": valor_entre_0_e_1000, "y": valor_entre_0_e_1000, "motivo": "curta explicação"}}
-    """
+    if modo == "rapido":
+        # 480p / Qualidade baixa: Ideal para checar se uma janela abriu rápido
+        screenshot = screenshot.resize((854, 480), Image.LANCZOS)
+        screenshot.save(caminho, "JPEG", quality=30, optimize=True)
+    else:
+        # 720p / Qualidade alta: Ideal para precisão de clique do mouse
+        screenshot = screenshot.resize((1280, 720), Image.LANCZOS)
+        screenshot.save(caminho, "JPEG", quality=80, optimize=True)
+    
+    # Converte para base64 para mandar pra nuvem
+    with open(caminho, "rb") as img:
+        b64_string = base64.b64encode(img.read()).decode('utf-8')
+        
+    return b64_string, caminho
+
+def clicar_no_elemento(descricao_alvo, modo="alta"):
+    """Olha a tela, acha a coordenada e clica (ou retorna erro)"""
+    img_b64, caminho_img = tirar_print_otimizado(modo)
+    largura_real, altura_real = pyautogui.size()
+
+    # O Prompt de Visão com a grade de coordenadas e check de status
+    prompt = f"""Analise este print da tela. Imagine que a imagem possui uma grade que vai de X=0 a 1000 (esquerda para direita) e Y=0 a 1000 (cima para baixo).
+    Encontre: '{descricao_alvo}'.
+    Se o alvo estiver na tela, retorne o centro dele em X e Y, e status 'ok'.
+    Se o alvo NÃO estiver na tela (ou houver tela de erro/carregamento), retorne status 'erro'.
+    Responda EXATAMENTE neste formato JSON: {{"x": valor_x, "y": valor_y, "status": "ok/erro"}}"""
 
     try:
         res = cliente.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            model="meta-llama/llama-4-scout-17b-16e-instruct", # Modelo mais rápido e atual de visão
             messages=[{"role": "user", "content": [
                 {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}}
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
             ]}],
             response_format={"type": "json_object"}
         )
-
-        dados = json.loads(res.choices[0].message.content)
         
-        # 3. A REGRA DE TRÊS (Tradução para pixels reais)
-        # Se a IA diz 500 num monitor de 1920px, o cálculo é (500 / 1000) * 1920 = 960px
+        dados = json.loads(res.choices[0].message.content)
+        status = dados.get('status', 'erro')
+        
+        # O Check de Sanidade: Se não achou, avisa e cancela o clique
+        if status == 'erro':
+            return "Não encontrei o alvo na tela ou ainda está carregando."
+
+        # Regra de Três: Converte a escala 1000x1000 para os pixels reais do seu monitor
         ponto_x = int((dados['x'] / 1000) * largura_real)
         ponto_y = int((dados['y'] / 1000) * altura_real)
 
-        print(f"🤖 Jairo: Vi o alvo em ({dados['x']},{dados['y']}). Clicando em {ponto_x}x{ponto_y}...")
-        
-        # Move o mouse e clica
-        pyautogui.moveTo(ponto_x, ponto_y, duration=0.5)
+        # Move o mouse suavenente (0.3s) para você ver o que ele está fazendo
+        pyautogui.moveTo(ponto_x, ponto_y, duration=0.3)
         pyautogui.click()
+        return f"Sucesso! Cliquei nas coordenadas {ponto_x}x{ponto_y}"
         
-        return f"Cliquei no elemento: {dados['motivo']}"
-
     except Exception as e:
-        return f"Erro na visão: {e}"
+        return f"Falha ao processar visão: {e}"
     finally:
-        if os.path.exists("view.png"): os.remove("view.png")
+        # Limpa o rastro da imagem pra não lotar seu HD
+        if os.path.exists(caminho_img): 
+            os.remove(caminho_img)
