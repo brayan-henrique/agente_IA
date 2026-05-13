@@ -53,7 +53,7 @@ def processar_com_ia(frase_usuario):
     historico_conversa.append({"role": "user", "content": frase_usuario})
 
     # Mantém as últimas mensagens na memória (não deixa o contexto estourar)
-    if len(historico_conversa) > 9: 
+    if len(historico_conversa) > 13: # 1 system + 12 mensagens (6 do usuário e 6 do assistente)
         historico_conversa.pop(1)
         historico_conversa.pop(1)
 

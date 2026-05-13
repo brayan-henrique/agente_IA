@@ -1,3 +1,11 @@
+import os
+
+# Esconde a mensagem de boas-vindas do Pygame
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
+
+# Silencia avisos de bibliotecas depreciadas no terminal
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 import keyboard
 from ouvidos import ouvir
 from cerebro import processar_com_ia
