@@ -82,7 +82,7 @@ def executar_acao(comando_json, mapa_programas):
         nativos = {"calculadora": "calc", "bloco de notas": "notepad", "paint": "mspaint"}
         for nativo, comando_cmd in nativos.items():
             if fuzz.partial_ratio(alvo, nativo) > 80:
-                os.system(comando_cmd)
+                os.system(f"start {comando_cmd}") # O 'start' libera o Jairo para não travar
                 return f"Abri o {nativo} pra você."
                 
         melhor_pontuacao = 0
@@ -104,8 +104,16 @@ def executar_acao(comando_json, mapa_programas):
 
     # --- 2. FECHAR PROGRAMAS ---
     elif acao == "fechar_programa":
-        alvo_formatado = alvo.replace(" ", "")
-        os.system(f"taskkill /f /im {alvo_formatado}.exe /t")
+        nativos = {"calculadora": "calc", "bloco de notas": "notepad", "paint": "mspaint"}
+        executavel = alvo.replace(" ", "") 
+        
+        # Traduz o nome se for programa nativo
+        for nativo, cmd in nativos.items():
+            if fuzz.partial_ratio(alvo, nativo) > 80:
+                executavel = cmd
+                break
+                
+        os.system(f"taskkill /f /im {executavel}.exe /t")
         return f"Fechei o {alvo}."
         
     # --- 3. ABRIR SITES ---
