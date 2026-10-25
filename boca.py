@@ -2,32 +2,56 @@ import edge_tts
 import asyncio
 import pygame
 import os
+import time
+import subprocess
 
-# Função para gerar e tocar a voz
-async def comunicar(texto):
-    # Escolha da voz: 'pt-BR-AntonioNeural' (Masculina/Séria) ou 'pt-BR-FranciscaNeural'
-    VOZ = "pt-BR-AntonioNeural" 
-    ARQUIVO_AUDIO = "fala_jairo.mp3"
+VOZ = "pt-BR-AntonioNeural"
 
-    # 1. Gera o áudio usando a API da Microsoft
+def falar_voz_nativa_windows(texto):
+    """
+    Fallback 100% offline usando o sintetizador nativo do Windows.
+    Garante que o Jairo fale mesmo se os servidores da Microsoft caírem.
+    """
+    try:
+        texto_limpo = texto.replace('"', '').replace("'", "")
+        cmd = f'Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("{texto_limpo}")'
+        subprocess.run(
+            ["powershell", "-Command", cmd], 
+            stdout=subprocess.DEVNULL, 
+            stderr=subprocess.DEVNULL,
+            creationflags=0x08000000 # Roda invisível sem abrir janela preta
+        )
+    except Exception as e:
+        print(f"[⚠️ Falha total no som]: {e}")
+
+async def comunicar_edge(texto, arquivo_audio):
     comunicador = edge_tts.Communicate(texto, VOZ)
-    await comunicador.save(ARQUIVO_AUDIO)
+    await comunicador.save(arquivo_audio)
 
-    # 2. Toca o áudio
     pygame.mixer.init()
-    pygame.mixer.music.load(ARQUIVO_AUDIO)
+    pygame.mixer.music.load(arquivo_audio)
     pygame.mixer.music.play()
 
-    # Espera o áudio terminar de tocar
     while pygame.mixer.music.get_busy():
-        continue
-    
-    pygame.mixer.quit()
-    
-    # 3. Limpa o arquivo temporário
-    if os.path.exists(ARQUIVO_AUDIO):
-        os.remove(ARQUIVO_AUDIO)
+        time.sleep(0.05)
 
-# Função auxiliar para chamar o async de forma simples
+    pygame.mixer.quit()
+
 def falar(texto):
-    asyncio.run(comunicar(texto))
+    """
+    Tenta falar com a voz neural da Microsoft. Se der erro 403 ou timeout,
+    fala com a voz nativa sem travar o Jairo.
+    """
+    arquivo_temp = f"fala_{int(time.time()*1000)}.mp3"
+    
+    try:
+        asyncio.run(comunicar_edge(texto, arquivo_temp))
+    except Exception as e:
+        print(f"\n[⚠️ Edge-TTS indisponível ({e}). Usando voz nativa...]")
+        falar_voz_nativa_windows(texto)
+    finally:
+        if os.path.exists(arquivo_temp):
+            try:
+                os.remove(arquivo_temp)
+            except Exception:
+                pass

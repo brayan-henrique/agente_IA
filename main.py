@@ -2,18 +2,15 @@ import os
 import warnings
 
 # ========================================================
-# FAXINA DO TERMINAL (TEM QUE SER AS PRIMEIRAS LINHAS)
+# FAXINA DO TERMINAL
 # ========================================================
-# Esconde a mensagem chata de boas-vindas do Pygame
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
-# Silencia avisos de bibliotecas velhas (como o pkg_resources)
 warnings.filterwarnings("ignore", category=UserWarning)
 
-# Agora sim, importamos o resto das ferramentas
 import keyboard
 import time
 import threading
-from ouvidos import ouvir
+from ouvidos import ouvir, inicializar_ouvidos
 from boca import falar
 from cerebro import processar_com_ia
 from maos import mapear_programas_windows, executar_acao
@@ -26,24 +23,24 @@ trava_voz = threading.Lock()
 pipeline_ativa = False
 
 def falar_seguro(texto):
-    """Garante que o Jairo não tente falar duas coisas ao mesmo tempo e travar o áudio"""
+    """Garante que o Jairo não tente falar duas coisas ao mesmo tempo"""
     with trava_voz:
         falar(texto)
 
 def executar_pipeline_background(comando_ia, mapa_programas):
-    """Esta função roda invisível no fundo enquanto o Jairo continua te ouvindo"""
+    """Roda as ações pesadas no fundo enquanto o Jairo continua te ouvindo"""
     global pipeline_ativa
     pipeline_ativa = True
     
     fala_jairo = comando_ia.get("resposta", "")
     pipeline = comando_ia.get("pipeline", [])
 
-    # 1. Fala logo a resposta pra não te deixar no vácuo
+    # 1. Fala logo a resposta
     if fala_jairo:
-        print(f"🤖 Jairo: {fala_jairo}")
+        print(f"\n🤖 Jairo: {fala_jairo}")
         falar_seguro(fala_jairo) 
     
-    # 2. Executa o roteiro passo a passo
+    # 2. Executa cada passo do roteiro
     for indice, passo in enumerate(pipeline):
         acao = passo.get("acao", "nenhuma")
         alvo = passo.get("alvo", "")
@@ -52,32 +49,29 @@ def executar_pipeline_background(comando_ia, mapa_programas):
         if acao != "nenhuma":
             print(f"   [⏳ Passo {indice+1}/{len(pipeline)}]: Executando '{acao}' no alvo '{alvo}'")
 
-        # -> Ação Visual (Olhar e Clicar)
+        # -> Visão computacional
         if acao == "usar_visao":
-            # Se for a última ação, usa precisão alta. Senão, tira print leve e rápido.
             modo_visao = "alta" if indice == len(pipeline) - 1 else "rapido"
             print(f"   [👁️ Analisando tela em modo '{modo_visao}']")
             
             resultado = clicar_no_elemento(alvo, modo=modo_visao) 
             print(f"   [RESULTADO VISUAL]: {resultado}")
             
-            # CHECAGEM DE SANIDADE: Se a visão falhar, ele para tudo.
             if "Não encontrei" in resultado or "Falha" in resultado:
                 print("   [⚠️ Abortando o resto da missão devido a falha visual].")
                 falar_seguro("Deu ruim aqui, não achei o que eu tava procurando. Missão abortada.")
                 break 
 
-        # -> Ações Físicas (Mouse/Teclado/Abrir/Fechar)
+        # -> Ações de mouse/teclado/janelas
         elif acao != "nenhuma":
             resultado = executar_acao(passo, mapa_programas)
             print(f"   [⚙️ AÇÃO EXECUTADA]: {resultado}")
         
-        # -> O Delay Inteligente
+        # -> Espera inteligente
         if tempo_espera > 0:
             print(f"   [⏱️ Aguardando {tempo_espera}s para o sistema carregar...]")
             time.sleep(tempo_espera)
             
-    # Libera o Jairo para tarefas pesadas novamente
     pipeline_ativa = False
 
 # ========================================================
@@ -90,8 +84,10 @@ def iniciar_sistema():
     print("      (Ctrl+Alt+D para dormir)          ")
     print("========================================")
     
+    inicializar_ouvidos()
+    
     mapa_programas = mapear_programas_windows()
-    print("\n🤖 Jairo: Sistemas online. Cérebro Multitarefa ativado.")
+    print("\n🤖 Jairo: Sistemas online. Cérebro Multitarefa ativado.\n")
     
     modo_espera = False 
     
@@ -107,17 +103,23 @@ def iniciar_sistema():
                 modo_espera = True
                 print("\n🤖 Jairo: Entrando em modo de espera zZz...")
 
-        frase = ouvir()
+        # Escuta o microfone
+        frase = ouvir(timeout=1.5, em_espera=modo_espera)
         
         if frase:
             frase = frase.lower()
             
-            # Ajuste de dicionário
-            correcoes = {"flechar": "fechar", "bloco de nó": "bloco de notas", "jarvis": "jairo", "jair": "jairo"}
+            # Dicionário de correções fonéticas comuns
+            correcoes = {
+                "flechar": "fechar", 
+                "bloco de nó": "bloco de notas", 
+                "jarvis": "jairo", 
+                "jair": "jairo"
+            }
             for errado, certo in correcoes.items():
                 frase = frase.replace(errado, certo)
                 
-            # Verifica se o Jairo está dormindo
+            # Se o Jairo estiver dormindo
             if modo_espera:
                 if "jairo" in frase:
                     modo_espera = False
@@ -128,7 +130,7 @@ def iniciar_sistema():
 
             print(f"\n🗣️ Você: '{frase}'")
             
-            # Comandos manuais para dormir/desligar
+            # Comandos de voz para dormir ou desligar
             if "parar de escutar" in frase or "vai dormir" in frase:
                 modo_espera = True
                 print("🤖 Jairo: Fui. Me chama se precisar.")
@@ -148,19 +150,24 @@ def iniciar_sistema():
             if comando_ia:
                 pipeline_nova = comando_ia.get("pipeline", [])
                 
-                # Verifica se o pedido atual exige AÇÃO FÍSICA PESADA (ignorando conversar ou parar loops)
-                tem_acao_pesada = any(p.get("acao") not in ["nenhuma", "parar_autoclick", "parar_autokey"] for p in pipeline_nova)
+                # Se for ação pesada física e ele já estiver ocupado
+                tem_acao_pesada = any(
+                    p.get("acao") not in ["nenhuma", "parar_autoclick", "parar_autokey"] 
+                    for p in pipeline_nova
+                )
 
-                # Se ele já estiver fazendo algo demorado e você pedir outra coisa demorada:
                 if pipeline_ativa and tem_acao_pesada:
                     aviso = "Pera aí chefe, tô terminando uma parada aqui. Dá um segundo."
                     print(f"🤖 Jairo: {aviso}")
                     threading.Thread(target=falar_seguro, args=(aviso,), daemon=True).start()
                     continue
                     
-                # Se for só conversa, pedir pra parar um loop, ou ele estiver livre:
-                # Dispara a tarefa pro background e deixa o ouvido livre!
-                threading.Thread(target=executar_pipeline_background, args=(comando_ia, mapa_programas), daemon=True).start()
+                # Dispara a execução em background e libera o microfone
+                threading.Thread(
+                    target=executar_pipeline_background, 
+                    args=(comando_ia, mapa_programas), 
+                    daemon=True
+                ).start()
 
 # ==========================================
 # MOTOR DE PARTIDA
