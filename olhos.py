@@ -1,77 +1,142 @@
-import pyautogui
-import base64
 import os
-import json
 import time
-from PIL import Image
-from groq import Groq
-from dotenv import load_dotenv
+import ctypes
+import pyautogui
+from PIL import Image, ImageDraw
+from telemetria import registrar_evento
 
-# Carrega as credenciais e inicializa a IA
-load_dotenv()
-cliente = Groq(api_key=os.getenv("GROQ_API_KEY"))
+try:
+    ctypes.windll.user32.SetProcessDPIAware()
+except Exception:
+    pass
 
-def tirar_print_otimizado(modo="alta"):
-    """Tira print e comprime para economizar dados e tempo de API"""
-    screenshot = pyautogui.screenshot()
-    caminho = "view_temp.jpg"
-    
-    if modo == "rapido":
-        # 480p / Qualidade baixa: Ideal para checar se uma janela abriu rápido
-        screenshot = screenshot.resize((854, 480), Image.LANCZOS)
-        screenshot.save(caminho, "JPEG", quality=30, optimize=True)
-    else:
-        # 720p / Qualidade alta: Ideal para precisão de clique do mouse
-        screenshot = screenshot.resize((1280, 720), Image.LANCZOS)
-        screenshot.save(caminho, "JPEG", quality=80, optimize=True)
-    
-    # Converte para base64 para mandar pra nuvem
-    with open(caminho, "rb") as img:
-        b64_string = base64.b64encode(img.read()).decode('utf-8')
-        
-    return b64_string, caminho
+ARQUIVO_DEBUG_IMAGEM = "debug_visao.jpg"
 
-def clicar_no_elemento(descricao_alvo, modo="alta"):
-    """Olha a tela, acha a coordenada e clica (ou retorna erro)"""
-    img_b64, caminho_img = tirar_print_otimizado(modo)
-    largura_real, altura_real = pyautogui.size()
+_modelo_visao = None
+_processador = None
+_torch = None
 
-    # O Prompt de Visão com a grade de coordenadas e check de status
-    prompt = f"""Analise este print da tela. Imagine que a imagem possui uma grade que vai de X=0 a 1000 (esquerda para direita) e Y=0 a 1000 (cima para baixo).
-    Encontre: '{descricao_alvo}'.
-    Se o alvo estiver na tela, retorne o centro dele em X e Y, e status 'ok'.
-    Se o alvo NÃO estiver na tela (ou houver tela de erro/carregamento), retorne status 'erro'.
-    Responda EXATAMENTE neste formato JSON: {{"x": valor_x, "y": valor_y, "status": "ok/erro"}}"""
+def inicializar_olhos():
+    """
+    Carrega o modelo de Visual Grounding nos 36GB de RAM com compatibilidade forçada.
+    """
+    global _modelo_visao, _processador, _torch
+    if _modelo_visao is not None:
+        return True
 
     try:
-        res = cliente.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct", # Modelo mais rápido e atual de visão
-            messages=[{"role": "user", "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
-            ]}],
-            response_format={"type": "json_object"}
-        )
-        
-        dados = json.loads(res.choices[0].message.content)
-        status = dados.get('status', 'erro')
-        
-        # O Check de Sanidade: Se não achou, avisa e cancela o clique
-        if status == 'erro':
-            return "Não encontrei o alvo na tela ou ainda está carregando."
+        registrar_evento("OLHOS", "Carregando modelo de visão local nos 36GB de RAM (Hugging Face)...")
+        import torch
+        from transformers import AutoProcessor, AutoModelForCausalLM, AutoConfig
 
-        # Regra de Três: Converte a escala 1000x1000 para os pixels reais do seu monitor
-        ponto_x = int((dados['x'] / 1000) * largura_real)
-        ponto_y = int((dados['y'] / 1000) * altura_real)
+        _torch = torch
+        nome_modelo = "microsoft/Florence-2-base"
 
-        # Move o mouse suavenente (0.3s) para você ver o que ele está fazendo
-        pyautogui.moveTo(ponto_x, ponto_y, duration=0.3)
-        pyautogui.click()
-        return f"Sucesso! Cliquei nas coordenadas {ponto_x}x{ponto_y}"
-        
+        # Trava de segurança para resolver o erro 'forced_bos_token_id'
+        config = AutoConfig.from_pretrained(nome_modelo, trust_remote_code=True)
+        if hasattr(config, "text_config"):
+            config.text_config.forced_bos_token_id = None
+        config.forced_bos_token_id = None
+
+        _processador = AutoProcessor.from_pretrained(nome_modelo, trust_remote_code=True)
+        _modelo_visao = AutoModelForCausalLM.from_pretrained(
+            nome_modelo, 
+            config=config,
+            torch_dtype=torch.float32, 
+            trust_remote_code=True
+        ).to("cpu")
+
+        _modelo_visao.eval()
+        registrar_evento("OLHOS", "Modelo de visão local carregado e pronto para uso!", status="SUCESSO")
+        return True
+
     except Exception as e:
-        return f"Falha ao processar visão: {e}"
-    finally:
-        # Limpa o rastro da imagem pra não lotar seu HD
-        if os.path.exists(caminho_img): 
-            os.remove(caminho_img)
+        registrar_evento("OLHOS", "Falha ao carregar modelo de visão local", str(e), status="ERRO")
+        return False
+
+def gerar_imagem_debug(screenshot, centro_x, centro_y, largura_tela, altura_tela, rotulo="", bbox=None):
+    """
+    Desenha o retângulo detectado pela IA e a mira amarela no ponto de clique.
+    """
+    try:
+        imagem_debug = screenshot.copy()
+        draw = ImageDraw.Draw(imagem_debug)
+
+        if bbox:
+            x1, y1, x2, y2 = bbox
+            draw.rectangle([x1, y1, x2, y2], outline="red", width=4)
+        else:
+            raio = 35
+            draw.rectangle([centro_x - raio, centro_y - raio, centro_x + raio, centro_y + raio], outline="red", width=4)
+
+        draw.line([centro_x - 15, centro_y, centro_x + 15, centro_y], fill="yellow", width=2)
+        draw.line([centro_x, centro_y - 15, centro_x, centro_y + 15], fill="yellow", width=2)
+        draw.ellipse([centro_x - 4, centro_y - 4, centro_x + 4, centro_y + 4], fill="red")
+
+        texto_info = f"ALVO: {rotulo} ({centro_x}x{centro_y})"
+        draw.text((max(0, centro_x - 40), max(0, centro_y - 30)), texto_info, fill="yellow")
+
+        imagem_debug.save(ARQUIVO_DEBUG_IMAGEM, "JPEG", quality=90)
+        registrar_evento("OLHOS", f"Imagem de debug salva em: '{ARQUIVO_DEBUG_IMAGEM}'")
+    except Exception as e:
+        registrar_evento("OLHOS", "Erro ao desenhar imagem de debug", str(e), status="AVISO")
+
+def clicar_no_elemento(descricao_alvo):
+    inicio = time.time()
+    registrar_evento("OLHOS", f"Localizando visualmente na tela: '{descricao_alvo}'")
+
+    if _modelo_visao is None:
+        sucesso = inicializar_olhos()
+        if not sucesso:
+            return "Falha ao inicializar motor de visão local."
+
+    screenshot = pyautogui.screenshot()
+    largura_real, altura_real = pyautogui.size()
+    imagem_rgb = screenshot.convert("RGB")
+
+    tarefa = "<CAPTION_TO_PHRASE_GROUNDING>"
+    prompt_completo = tarefa + descricao_alvo
+
+    try:
+        with _torch.no_grad():
+            inputs = _processador(text=prompt_completo, images=imagem_rgb, return_tensors="pt")
+            generated_ids = _modelo_visao.generate(
+                input_ids=inputs["input_ids"],
+                pixel_values=inputs["pixel_values"],
+                max_new_tokens=256,
+                num_beams=3
+            )
+            generated_text = _processador.batch_decode(generated_ids, skip_special_tokens=False)[0]
+            resultado = _processador.post_process_generation(
+                generated_text, 
+                task=tarefa, 
+                image_size=(largura_real, altura_real)
+            )
+
+        dados_grounding = resultado.get(tarefa, {})
+        bboxes = dados_grounding.get("bboxes", [])
+
+        if not bboxes:
+            tempo = round(time.time() - inicio, 2)
+            registrar_evento("OLHOS", f"Elemento '{descricao_alvo}' não encontrado na tela", f"Tempo: {tempo}s", status="AVISO")
+            return f"Não encontrei '{descricao_alvo}' na tela."
+
+        caixa = bboxes[0]
+        x1, y1, x2, y2 = [int(v) for v in caixa]
+
+        ponto_x = int((x1 + x2) / 2)
+        ponto_y = int((y1 + y2) / 2)
+
+        gerar_imagem_debug(screenshot, ponto_x, ponto_y, largura_real, altura_real, descricao_alvo, bbox=(x1, y1, x2, y2))
+
+        pyautogui.moveTo(ponto_x, ponto_y, duration=0.25)
+        pyautogui.click()
+
+        tempo = round(time.time() - inicio, 2)
+        registrar_evento("OLHOS", f"Clique realizado em ({ponto_x}x{ponto_y})", f"Tempo: {tempo}s", status="SUCESSO")
+        return f"Sucesso! Cliquei em '{descricao_alvo}' nas coordenadas {ponto_x}x{ponto_y}"
+
+    except Exception as e:
+        tempo = round(time.time() - inicio, 2)
+        registrar_evento("OLHOS", "Erro na inferência visual local", f"{e} (Tempo: {tempo}s)", status="ERRO")
+        return f"Falha na visão local: {e}"
